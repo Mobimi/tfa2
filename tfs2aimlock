@@ -16,7 +16,10 @@ local aimFOV = 100
 local draggingSlider = false
 local uiVisible = true
 local fovVisible = true
-local espVisible = false  -- Mặc định ESP Zombies sẽ ẩn
+local espVisible = false
+
+-- ESP storage
+local espObjects = {}
 
 ----------------------------------------------------------------
 -- GUI SYSTEM
@@ -26,17 +29,15 @@ screenGui.Name = "AimLockGui"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
--- Main frame chứa tất cả control
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 260, 0, 170)
-mainFrame.Position = UDim2.new(0.5, -130, 0.5, -85) -- Giữa màn hình
+mainFrame.Size = UDim2.new(0, 260, 0, 250)
+mainFrame.Position = UDim2.new(0.5, -130, 0.5, -85)
 mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 mainFrame.Active = true
 mainFrame.Draggable = true
 
--- Toggle AimLock Button
 local toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0, 200, 0, 40)
 toggleButton.Position = UDim2.new(0, 30, 0, 10)
@@ -49,16 +50,10 @@ toggleButton.TextSize = 20
 
 toggleButton.MouseButton1Click:Connect(function()
 	aimLockActive = not aimLockActive
-	if aimLockActive then
-		toggleButton.Text = "AimLock On"
-		toggleButton.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-	else
-		toggleButton.Text = "AimLock Off"
-		toggleButton.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-	end
+	toggleButton.Text = aimLockActive and "AimLock On" or "AimLock Off"
+	toggleButton.BackgroundColor3 = aimLockActive and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0)
 end)
 
--- FOV Label
 local fovLabel = Instance.new("TextLabel")
 fovLabel.Size = UDim2.new(0, 200, 0, 25)
 fovLabel.Position = UDim2.new(0, 30, 0, 60)
@@ -69,7 +64,6 @@ fovLabel.Font = Enum.Font.SourceSans
 fovLabel.TextSize = 18
 fovLabel.Parent = mainFrame
 
--- FOV Slider
 local slider = Instance.new("TextButton")
 slider.Size = UDim2.new(0, 200, 0, 20)
 slider.Position = UDim2.new(0, 30, 0, 90)
@@ -83,7 +77,6 @@ sliderKnob.Position = UDim2.new(0, (aimFOV / 300) * 200, 0, 0)
 sliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 sliderKnob.Parent = slider
 
--- Xử lý kéo slider
 slider.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		draggingSlider = true
@@ -96,7 +89,6 @@ slider.InputEnded:Connect(function(input)
 	end
 end)
 
--- FOV vòng tròn hiển thị
 local fovCircle = Drawing.new("Circle")
 fovCircle.Color = Color3.fromRGB(0, 170, 255)
 fovCircle.Thickness = 2
@@ -105,10 +97,9 @@ fovCircle.Radius = aimFOV
 fovCircle.Filled = false
 fovCircle.Visible = true
 
--- Ẩn/Hiện GUI chính
 local toggleUIBtn = Instance.new("TextButton")
 toggleUIBtn.Size = UDim2.new(0, 100, 0, 40)
-toggleUIBtn.Position = UDim2.new(0, 10, 0, 10) -- Nút ở phía trên bên trái
+toggleUIBtn.Position = UDim2.new(0, 10, 0, 10)
 toggleUIBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
 toggleUIBtn.Text = "Hide UI"
 toggleUIBtn.Parent = screenGui
@@ -116,7 +107,6 @@ toggleUIBtn.TextColor3 = Color3.new(1,1,1)
 toggleUIBtn.Font = Enum.Font.SourceSansBold
 toggleUIBtn.TextSize = 20
 
--- Nút Show/Hide FOV
 local toggleFovBtn = Instance.new("TextButton")
 toggleFovBtn.Size = UDim2.new(0, 200, 0, 40)
 toggleFovBtn.Position = UDim2.new(0, 30, 0, 140)
@@ -127,7 +117,6 @@ toggleFovBtn.TextColor3 = Color3.new(1,1,1)
 toggleFovBtn.Font = Enum.Font.SourceSansBold
 toggleFovBtn.TextSize = 20
 
--- Nút Show/Hide ESP Zombies
 local toggleEspBtn = Instance.new("TextButton")
 toggleEspBtn.Size = UDim2.new(0, 200, 0, 40)
 toggleEspBtn.Position = UDim2.new(0, 30, 0, 190)
@@ -141,11 +130,7 @@ toggleEspBtn.TextSize = 20
 toggleUIBtn.MouseButton1Click:Connect(function()
 	uiVisible = not uiVisible
 	mainFrame.Visible = uiVisible
-	if uiVisible then
-		toggleUIBtn.Text = "Hide UI"
-	else
-		toggleUIBtn.Text = "Show UI"
-	end
+	toggleUIBtn.Text = uiVisible and "Hide UI" or "Show UI"
 end)
 
 toggleFovBtn.MouseButton1Click:Connect(function()
@@ -154,13 +139,72 @@ toggleFovBtn.MouseButton1Click:Connect(function()
 	toggleFovBtn.Text = fovVisible and "Hide FOV Circle" or "Show FOV Circle"
 end)
 
+local function clearESP()
+	for _, v in pairs(espObjects) do
+		if v and v.Parent then
+			v:Destroy()
+		end
+	end
+	table.clear(espObjects)
+end
+
+local function createESP(obj)
+	if obj:IsA("Model") and not obj:FindFirstChild("ESP_Highlight") then
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "ESP_Highlight"
+		highlight.Adornee = obj
+		highlight.FillColor = Color3.new(1, 0, 0)
+		highlight.OutlineColor = Color3.new(1, 0, 0)
+		highlight.FillTransparency = 1
+		highlight.OutlineTransparency = 0
+		highlight.Parent = obj
+		table.insert(espObjects, highlight)
+
+		local billboard = Instance.new("BillboardGui")
+		billboard.Name = "ESP_Billboard"
+		billboard.Adornee = obj
+		billboard.Size = UDim2.new(0, 100, 0, 50)
+		billboard.StudsOffset = Vector3.new(0, 3, 0)
+		billboard.AlwaysOnTop = true
+		billboard.Parent = obj
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(1, 0, 1, 0)
+		label.BackgroundTransparency = 1
+		label.TextColor3 = Color3.new(1, 0, 0)
+		label.TextSize = 16
+		label.Font = Enum.Font.SourceSansBold
+		label.Text = obj.Name
+		label.Parent = billboard
+
+		table.insert(espObjects, billboard)
+	end
+end
+
+local function updateESP()
+	clearESP()
+	if espVisible then
+		for _, z in ipairs(zombiesFolder:GetChildren()) do
+			createESP(z)
+		end
+	end
+end
+
 toggleEspBtn.MouseButton1Click:Connect(function()
 	espVisible = not espVisible
 	toggleEspBtn.Text = espVisible and "Hide Body ESP Zombies" or "Show Body ESP Zombies"
+	updateESP()
+end)
+
+zombiesFolder.ChildAdded:Connect(function(child)
+	if espVisible then
+		task.wait(0.1)
+		createESP(child)
+	end
 end)
 
 ----------------------------------------------------------------
--- HÀM TÌM ZOMBIE GẦN NHẤT VÀ CÓ TRONG FOV
+-- HÀM TÌM ZOMBIE GẦN NHẤT TRONG FOV
 ----------------------------------------------------------------
 local function getClosestZombieInFOV()
 	local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
@@ -188,7 +232,6 @@ end
 -- VÒNG LẶP CHÍNH
 ----------------------------------------------------------------
 RunService.RenderStepped:Connect(function()
-	-- Cập nhật slider nếu đang kéo
 	if draggingSlider then
 		local mouseX = UserInputService:GetMouseLocation().X
 		local sliderX = slider.AbsolutePosition.X
@@ -199,13 +242,11 @@ RunService.RenderStepped:Connect(function()
 		fovLabel.Text = "Aim FOV: " .. aimFOV
 	end
 
-	-- Cập nhật vòng tròn FOV
 	local center = camera.ViewportSize / 2
 	fovCircle.Position = center
 	fovCircle.Radius = aimFOV
 	fovCircle.Visible = fovVisible
 
-	-- AimLock xử lý
 	if aimLockActive then
 		local closestZombie = getClosestZombieInFOV()
 		if closestZombie then
@@ -213,26 +254,5 @@ RunService.RenderStepped:Connect(function()
 			camera.CFrame = CFrame.new(camera.CFrame.Position, targetPart.Position)
 		end
 	end
-	
-	-- Hiển thị ESP cho Zombies nếu bật
-	if espVisible then
-		for _, zombie in ipairs(zombiesFolder:GetChildren()) do
-			if zombie:IsA("Model") then
-				for _, part in pairs(zombie:GetChildren()) do
-					if part:IsA("BasePart") then
-						local screenPos, onScreen = camera:WorldToScreenPoint(part.Position)
-						if onScreen then
-							-- Outline ESP
-							local espOutline = Drawing.new("Square")
-							espOutline.Visible = true
-							espOutline.Color = Color3.fromRGB(255, 0, 0)
-							espOutline.Thickness = 3
-							espOutline.Size = Vector2.new(100, 100)
-							espOutline.Position = Vector2.new(screenPos.X - 50, screenPos.Y - 50)
-						end
-					end
-				end
-			end
-		end
-	end
 end)
+
