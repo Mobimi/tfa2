@@ -1,0 +1,175 @@
+--// AIM LOCK SCRIPT V2.5 by YAKO (Mode Swap, Updated Keys Text, Cleaned) //--
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Debris = game:GetService("Debris")
+local camera = workspace.CurrentCamera
+local player = Players.LocalPlayer
+local playerCharacter = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = playerCharacter:WaitForChild("HumanoidRootPart")
+
+-- Config
+local aimPartName = "Head" -- !!! QUAN TRỌNG: Đảm bảo tên này ĐÚNG !!!
+local zombiesFolder = workspace:WaitForChild("Zombies", 10) -- !!! QUAN TRỌNG: Đảm bảo đường dẫn này ĐÚNG !!!
+local FOV_CHANGE_AMOUNT = 10
+local MOUSE_SWITCH_THRESHOLD = 15
+local MIN_FOV = MOUSE_SWITCH_THRESHOLD
+local MAX_FOV = 300
+local AIM_SMOOTHING_FACTOR = 0.2
+
+-- State
+local aimLockActive = false
+local aimFOV = 100; if aimFOV < MIN_FOV then aimFOV = MIN_FOV end
+local uiVisible = false
+local espVisible = false
+local aimMode = 1 -- *** CHẾ ĐỘ MẶC ĐỊNH LÀ 1 (Distance - Gần người chơi nhất) ***
+local currentTarget = nil -- Dùng cho Mode 2 (Crosshair)
+
+-- ESP storage
+local espObjects = {}
+local function getPlayerHRP() if playerCharacter and playerCharacter.Parent and humanoidRootPart and humanoidRootPart.Parent == playerCharacter then return humanoidRootPart end; playerCharacter = player.Character; if playerCharacter then humanoidRootPart = playerCharacter:FindFirstChild("HumanoidRootPart"); return humanoidRootPart end; return nil end
+
+----------------------------------------------------------------
+-- GUI SYSTEM (Cập nhật text phím)
+----------------------------------------------------------------
+local screenGui = Instance.new("ScreenGui"); screenGui.Name = "AimLockInfoGui"; screenGui.ResetOnSpawn = false; screenGui.IgnoreGuiInset = true; screenGui.Parent = player:WaitForChild("PlayerGui"); screenGui.Enabled = true
+local crosshairDot = Instance.new("Frame"); crosshairDot.Name = "CrosshairDot"; crosshairDot.AnchorPoint = Vector2.new(0.5, 0.5); crosshairDot.Position = UDim2.new(0.5, 0, 0.5, 0); crosshairDot.Size = UDim2.new(0, 4, 0, 4); crosshairDot.BackgroundColor3 = Color3.new(1, 1, 1); crosshairDot.BorderSizePixel = 0; crosshairDot.ZIndex = 10; crosshairDot.Parent = screenGui
+local mainFrame = Instance.new("Frame"); mainFrame.Size = UDim2.new(0, 220, 0, 145); mainFrame.Position = UDim2.new(0.01, 0, 0.5, -72); mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40); mainFrame.BackgroundTransparency = 0.3; mainFrame.BorderSizePixel = 1; mainFrame.BorderColor3 = Color3.fromRGB(200, 200, 200); mainFrame.Parent = screenGui; mainFrame.Visible = uiVisible
+
+local logoLabel = Instance.new("TextLabel");logoLabel.Size=UDim2.new(1,-10,0,25);logoLabel.Position=UDim2.new(0,5,0,5);logoLabel.BackgroundTransparency=1;logoLabel.TextColor3=Color3.fromRGB(0,255,255);logoLabel.Text="YAKO";logoLabel.Font=Enum.Font.SourceSansBold;logoLabel.TextSize=22;logoLabel.TextXAlignment=Enum.TextXAlignment.Center;logoLabel.Parent=mainFrame
+local titleLabel = Instance.new("TextLabel");titleLabel.Size=UDim2.new(1,-10,0,20);titleLabel.Position=UDim2.new(0,5,0,30);titleLabel.BackgroundTransparency=1;titleLabel.TextColor3=Color3.new(1,1,1);titleLabel.Text="Menu (N để Hiện/Ẩn)";titleLabel.Font=Enum.Font.SourceSansBold;titleLabel.TextSize=16;titleLabel.TextXAlignment=Enum.TextXAlignment.Left;titleLabel.Parent=mainFrame
+local aimbotStatusLabel = Instance.new("TextLabel");aimbotStatusLabel.Size=UDim2.new(1,-10,0,20);aimbotStatusLabel.Position=UDim2.new(0,5,0,55);aimbotStatusLabel.BackgroundTransparency=1;aimbotStatusLabel.TextColor3=Color3.fromRGB(255,0,0);aimbotStatusLabel.Text="[L] Aimbot: Off";aimbotStatusLabel.Font=Enum.Font.SourceSans;aimbotStatusLabel.TextSize=16;aimbotStatusLabel.TextXAlignment=Enum.TextXAlignment.Left;aimbotStatusLabel.Parent=mainFrame
+local aimModeStatusLabel = Instance.new("TextLabel");aimModeStatusLabel.Size=UDim2.new(1,-10,0,20);aimModeStatusLabel.Position=UDim2.new(0,5,0,75);aimModeStatusLabel.BackgroundTransparency=1;aimModeStatusLabel.TextColor3=Color3.fromRGB(255,165,0);aimModeStatusLabel.Text="[=] Mode: Distance";aimModeStatusLabel.Font=Enum.Font.SourceSans;aimModeStatusLabel.TextSize=16;aimModeStatusLabel.TextXAlignment=Enum.TextXAlignment.Left;aimModeStatusLabel.Parent=mainFrame -- Sửa text phím và mode mặc định
+local espStatusLabel = Instance.new("TextLabel");espStatusLabel.Size=UDim2.new(1,-10,0,20);espStatusLabel.Position=UDim2.new(0,5,0,95);espStatusLabel.BackgroundTransparency=1;espStatusLabel.TextColor3=Color3.fromRGB(255,0,0);espStatusLabel.Text="[M] ESP: Off";espStatusLabel.Font=Enum.Font.SourceSans;espStatusLabel.TextSize=16;espStatusLabel.TextXAlignment=Enum.TextXAlignment.Left;espStatusLabel.Parent=mainFrame
+local fovLabel = Instance.new("TextLabel");fovLabel.Size=UDim2.new(1,-10,0,20);fovLabel.Position=UDim2.new(0,5,0,115);fovLabel.BackgroundTransparency=1;fovLabel.TextColor3=Color3.new(1,1,1);fovLabel.Text="[; / '] FOV: "..aimFOV;fovLabel.Font=Enum.Font.SourceSans;fovLabel.TextSize=16;fovLabel.TextXAlignment=Enum.TextXAlignment.Left;fovLabel.Parent=mainFrame -- Sửa text phím
+
+local fovCircle = Drawing.new("Circle");fovCircle.Color=Color3.fromRGB(0,170,255);fovCircle.Thickness=1;fovCircle.NumSides=64;fovCircle.Radius=aimFOV;fovCircle.Filled=false;fovCircle.Visible=uiVisible
+local thresholdCircle = Drawing.new("Circle");thresholdCircle.Color=Color3.fromRGB(255,255,0);thresholdCircle.Thickness=1;thresholdCircle.NumSides=32;thresholdCircle.Radius=MOUSE_SWITCH_THRESHOLD;thresholdCircle.Filled=false;thresholdCircle.Visible=false
+
+----------------------------------------------------------------
+-- HÀM CẬP NHẬT GUI (Cập nhật text phím và tên mode)
+----------------------------------------------------------------
+local function updateAimbotStatusLabel() aimbotStatusLabel.Text = "[L] Aimbot: " .. (aimLockActive and "On" or "Off"); aimbotStatusLabel.TextColor3 = aimLockActive and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0) end
+local function updateAimModeStatusLabel() local modeText = aimMode == 1 and "Distance" or "Crosshair"; aimModeStatusLabel.Text = "[=] Mode: " .. modeText end -- Sửa tên mode và text phím
+local function updateEspStatusLabel() espStatusLabel.Text = "[M] ESP: " .. (espVisible and "On" or "Off"); espStatusLabel.TextColor3 = espVisible and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0) end
+local function updateFovLabel() fovLabel.Text = "[; / '] FOV: " .. aimFOV; fovCircle.Radius = aimFOV end -- Sửa text phím
+
+----------------------------------------------------------------
+-- ESP LOGIC (Giữ nguyên)
+----------------------------------------------------------------
+local function clearESP() for _, v in pairs(espObjects) do if v and v.Parent then v:Destroy() end end; table.clear(espObjects) end
+local function createESP(obj) if obj:IsA("Model") and obj:FindFirstChild(aimPartName) and not obj:FindFirstChild("ESP_Highlight") then local h = obj:FindFirstChildOfClass("Humanoid"); if h and h.Health <= 0 then return end; local hl = Instance.new("Highlight"); hl.Name="ESP_Highlight";hl.Adornee=obj;hl.FillColor=Color3.new(1,0,0);hl.OutlineColor=Color3.new(1,0,0);hl.FillTransparency=1;hl.OutlineTransparency=0;hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop;hl.Parent=obj;table.insert(espObjects,hl) end end
+local function updateESP() clearESP(); if espVisible then if not zombiesFolder then return end; local children = zombiesFolder:GetChildren(); for i=1, #children do createESP(children[i]) end end end
+if zombiesFolder then zombiesFolder.ChildAdded:Connect(function(child) if espVisible and child:IsA("Model") then task.wait(0.1); createESP(child) end end) end
+
+----------------------------------------------------------------
+-- HÀM TÌM ZOMBIE (Giữ nguyên)
+----------------------------------------------------------------
+local function isZombieValidAndInFOV(zombie) if not zombie or not zombie.Parent then return false end; local humanoid = zombie:FindFirstChildOfClass("Humanoid"); if zombie:IsA("Model") and zombie:FindFirstChild(aimPartName) and (not humanoid or humanoid.Health > 0) then local part = zombie:FindFirstChild(aimPartName); if not part then return false end; local screenPos, onScreen = camera:WorldToScreenPoint(part.Position); if onScreen then local screenCenter=Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2); local dist=(Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude; if dist <= aimFOV then return true, screenPos, dist end end end; return false end
+local function getClosestZombieToCrosshairInFOV() local closestScreenDist=aimFOV+1;local targetZombie=nil;if not zombiesFolder then return nil end;local children=zombiesFolder:GetChildren();for i=1,#children do local zombie=children[i]; local isValid,_,screenDist=isZombieValidAndInFOV(zombie);if isValid then if screenDist<closestScreenDist then closestScreenDist=screenDist;targetZombie=zombie end end end;return targetZombie end
+local function getClosestZombieToPlayerInFOV() local closestWorldDist=math.huge;local targetZombie=nil;local playerHRP=getPlayerHRP();if not playerHRP then return nil end;if not zombiesFolder then return nil end;local playerPos=playerHRP.Position;local children=zombiesFolder:GetChildren();for i=1,#children do local zombie=children[i];local isValid,_,_=isZombieValidAndInFOV(zombie);if isValid then local zombiePart=zombie:FindFirstChild(aimPartName);if zombiePart then local worldDist=(playerPos-zombiePart.Position).Magnitude;if worldDist<closestWorldDist then closestWorldDist=worldDist;targetZombie=zombie end end end end;return targetZombie end
+
+----------------------------------------------------------------
+-- XỬ LÝ INPUT BÀN PHÍM (Giữ nguyên phím đã đổi, đã xóa print)
+----------------------------------------------------------------
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	local keyCode = input.KeyCode
+    local isProcessed = gameProcessedEvent
+
+	if keyCode == Enum.KeyCode.N then
+		uiVisible = not uiVisible; mainFrame.Visible = uiVisible; fovCircle.Visible = uiVisible
+		if not uiVisible then currentTarget = nil; thresholdCircle.Visible = false end
+        return
+	end
+
+    if isProcessed or not uiVisible then return end
+
+	if keyCode == Enum.KeyCode.L then
+		aimLockActive = not aimLockActive; updateAimbotStatusLabel()
+		if not aimLockActive then currentTarget = nil; thresholdCircle.Visible = false end
+	elseif keyCode == Enum.KeyCode.M then
+		espVisible = not espVisible; updateEspStatusLabel(); updateESP()
+	elseif keyCode == Enum.KeyCode.Semicolon then -- Giảm FOV
+		aimFOV = math.clamp(aimFOV - FOV_CHANGE_AMOUNT, MIN_FOV, MAX_FOV)
+		updateFovLabel()
+	elseif keyCode == Enum.KeyCode.Quote then -- Tăng FOV
+		aimFOV = math.clamp(aimFOV + FOV_CHANGE_AMOUNT, MIN_FOV, MAX_FOV)
+		updateFovLabel()
+	elseif keyCode == Enum.KeyCode.Equals then -- Đổi Mode
+		aimMode = aimMode == 1 and 2 or 1; updateAimModeStatusLabel(); currentTarget = nil
+        thresholdCircle.Visible = (aimLockActive and aimMode == 2) -- Chỉ hiển thị vòng nhỏ ở mode 2 mới (Crosshair)
+	end
+end)
+
+----------------------------------------------------------------
+-- VÒNG LẶP CHÍNH (RenderStepped - Đảo logic Mode 1 và Mode 2)
+----------------------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    local center = camera.ViewportSize / 2
+	if fovCircle.Visible then fovCircle.Position = center end
+    thresholdCircle.Position = center
+    thresholdCircle.Visible = (aimLockActive and aimMode == 2) -- *** Vòng tròn nhỏ chỉ hiện ở Mode 2 (Crosshair) ***
+
+	if aimLockActive then
+		local targetToAimPart=nil;local targetZombieModel=nil
+
+        -- *** LOGIC ĐÃ ĐẢO NGƯỢC ***
+		if aimMode == 1 then -- Chế độ Distance (Gần người chơi nhất - Tức thời)
+			currentTarget = nil -- Mode này không cần lưu target
+			local closestZombie = getClosestZombieToPlayerInFOV()
+			if closestZombie then
+                local aimPart=closestZombie:FindFirstChild(aimPartName)
+                if aimPart and aimPart:IsA("BasePart") then
+				    targetToAimPart=aimPart;targetZombieModel=closestZombie
+                    -- Nhắm tức thời
+				    camera.CFrame=CFrame.new(camera.CFrame.Position,targetToAimPart.Position)
+                end
+            end
+
+		elseif aimMode == 2 then -- Chế độ Crosshair (Gần tâm nhất - Mượt + Stickiness)
+			local mouseLocation=UserInputService:GetMouseLocation();local forceRetarget=false
+            -- Kiểm tra target hiện tại (currentTarget)
+			if currentTarget then
+                local isValid,screenPos,_=isZombieValidAndInFOV(currentTarget)
+                if not isValid then currentTarget=nil
+                elseif screenPos then
+                    local distFromMouseToTarget=(mouseLocation-screenPos).Magnitude
+                    if distFromMouseToTarget>MOUSE_SWITCH_THRESHOLD then
+                        forceRetarget=true;currentTarget=nil
+                    end
+                end
+            end
+            -- Tìm target mới nếu cần
+			if not currentTarget then currentTarget=getClosestZombieToCrosshairInFOV() end
+            -- Thực hiện aim nếu có target
+			if currentTarget then
+                local aimPart=currentTarget:FindFirstChild(aimPartName)
+                if aimPart and aimPart:IsA("BasePart") then
+                    targetToAimPart=aimPart;targetZombieModel=currentTarget
+                    local desiredCFrame=CFrame.new(camera.CFrame.Position,targetToAimPart.Position)
+                    -- Aim mượt
+                    camera.CFrame=camera.CFrame:Lerp(desiredCFrame,AIM_SMOOTHING_FACTOR)
+                else
+                    currentTarget=nil -- Reset nếu target không hợp lệ
+                end
+            end
+		end
+	else
+		currentTarget=nil; thresholdCircle.Visible=false
+	end
+end)
+
+-- Cập nhật GUI ban đầu
+updateAimbotStatusLabel(); updateAimModeStatusLabel(); updateEspStatusLabel(); updateFovLabel()
+-- Xử lý respawn
+player.CharacterAdded:Connect(function(character) playerCharacter=character; humanoidRootPart=character:WaitForChild("HumanoidRootPart"); currentTarget=nil; task.wait(0.5); humanoidRootPart=getPlayerHRP() end)
+-- Thông báo load
+if not zombiesFolder then warn("!! WARNING: ZOMBIES FOLDER NOT FOUND !!") end -- Dùng warn để nổi bật hơn
+print("-----------------------------------------")
+print("YAKO Aim/ESP Script Loaded (v2.5 Mode Swap)")
+print("Press N to toggle menu.")
+print("Controls (Menu Open): L=Aim, M=ESP, [;]=FOV Down, [']=FOV Up, [=]=Aim Mode") -- Cập nhật hướng dẫn
+print("-----------------------------------------")
+humanoidRootPart = getPlayerHRP()
